@@ -66,6 +66,9 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+
 
 @Composable
 fun PowerliftingScreen(
@@ -75,6 +78,9 @@ fun PowerliftingScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
+
+    val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
 
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -214,18 +220,17 @@ fun PowerliftingScreen(
 
                 if (reportPath != null) {
                     lastReportPath = reportPath
-                    // Automatically share the report
                     val shareSuccess = csvReportManager.shareReport(reportPath)
                     if (shareSuccess) {
-                        Log.d("RepReport", "Report generated and shared: $reportPath")
+                        Log.d("RepReport", "Overlay line report generated and shared: $reportPath")
                     } else {
                         Log.e("RepReport", "Failed to share report")
                     }
                 } else {
-                    Log.d("RepReport", "No reps to report")
+                    Log.d("RepReport", "No overlay line reps to report")
                 }
             } catch (e: Exception) {
-                Log.e("RepReport", "Failed to generate report", e)
+                Log.e("RepReport", "Failed to generate overlay line report", e)
             } finally {
                 isGeneratingReport = false
             }
@@ -251,6 +256,22 @@ fun PowerliftingScreen(
             voiceCommandManager.stopListening()
         }
     }
+
+    LaunchedEffect(state.lineHeight, state.rangeOfMotion, state.selectedExercise, state.tempo, state.currentPhase) {
+        val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+
+        enhancedPathManager.updateOverlaySettings(
+            lineHeight = state.lineHeight,
+            rangeOfMotion = state.rangeOfMotion,
+            exercise = state.selectedExercise,
+            tempo = state.tempo,
+            currentPhase = state.currentPhase,
+            canvasHeight = screenHeightPx
+        )
+
+        Log.d("OverlayIntegration", "Updated overlay settings: lineHeight=${state.lineHeight}, range=${state.rangeOfMotion}, exercise=${state.selectedExercise}")
+    }
+
 
     // Clean up voice managers and detector
     DisposableEffect(Unit) {
@@ -355,22 +376,41 @@ fun PowerliftingScreen(
 
                                         // Process bar path tracking if detections exist
                                         if (detections.isNotEmpty()) {
+                                            // UPDATED: Ensure overlay settings are current
+                                            val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+
+                                            enhancedPathManager.updateOverlaySettings(
+                                                lineHeight = state.lineHeight,
+                                                rangeOfMotion = state.rangeOfMotion,
+                                                exercise = state.selectedExercise,
+                                                tempo = state.tempo,
+                                                currentPhase = state.currentPhase,
+                                                canvasHeight = screenHeightPx
+                                            )
+
                                             val updatedPaths = enhancedPathManager.addDetection(detections.first(), currentTime)
                                             barPaths = updatedPaths
 
                                             // Update session stats
                                             sessionStats = enhancedPathManager.getSessionStats()
 
-                                            // Analyze movement if we have active paths
-                                            if (updatedPaths.isNotEmpty()) {
-                                                val activePath = updatedPaths.last()
-                                                if (activePath.points.size > 10) {
-                                                    pathAnalysis = pathAnalyzer.analyzeMovement(activePath.points)
+                                            // UPDATED: Remove old path analysis - now using overlay line detection
+                                            // The pathAnalyzer.analyzeMovement() call is no longer needed
+
+                                            // Update total reps from completed reps (now based on overlay line)
+                                            val previousRepCount = totalBarbellReps
+                                            totalBarbellReps = enhancedPathManager.getCompletedReps().size
+
+                                            // Log when new overlay line rep is detected
+                                            if (totalBarbellReps > previousRepCount) {
+                                                Log.d("OverlayLineReps", "NEW REP DETECTED! Total: $totalBarbellReps - Based on overlay line crossings for ${state.selectedExercise.displayName}")
+                                                Log.d("OverlayLineReps", "Overlay line at: ${state.lineHeight}dp, Range: ${state.rangeOfMotion}dp")
+
+                                                // Optional: Voice feedback for detected rep
+                                                if (voiceCoach.isEnabled.value && voiceCoach.isReady.value) {
+                                                    voiceCoach.speak("Rep $totalBarbellReps detected", VoiceCoachManager.Priority.HIGH)
                                                 }
                                             }
-
-                                            // Update total reps from completed reps
-                                            totalBarbellReps = enhancedPathManager.getCompletedReps().size
                                         }
 
                                         // Calculate detection FPS

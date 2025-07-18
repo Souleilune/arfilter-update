@@ -1,11 +1,12 @@
+// ===== UPDATED: RepData.kt =====
 package com.example.arfilter.detector
 
 import java.text.SimpleDateFormat
 import java.util.*
 
 /**
- * Simple data class to track individual rep performance
- * Focused on basic metrics that lifters actually care about
+ * Enhanced rep data class with overlay line adherence metrics
+ * Tracks how well each rep follows the AR overlay line guidance
  */
 data class RepData(
     val repNumber: Int,
@@ -18,7 +19,7 @@ data class RepData(
     val verticalRange: Float,           // Pure vertical displacement
     val avgVelocity: Float,             // Average movement speed
     val peakVelocity: Float,           // Fastest point in lift
-    val pathDeviation: Float,          // How much bar drifted from vertical
+    val pathDeviation: Float,          // How much bar drifted from overlay line
     val duration: Float,               // Total rep duration in seconds
 
     // Phase Breakdown
@@ -26,8 +27,11 @@ data class RepData(
     val pauseDuration: Float,          // Time at bottom
     val concentricDuration: Float,     // Time going up
 
-    // Quality Score (0-100)
-    val qualityScore: Float            // Overall rep quality
+    // Quality Score (0-100) - now based on overlay line adherence
+    val qualityScore: Float,           // Overall rep quality based on overlay line
+
+    // NEW: Overlay Line Specific Metrics
+    val overlayLineAdherence: Float = calculateOverlayLineAdherence(pathDeviation, qualityScore)
 ) {
 
     fun getFormattedTimestamp(): String {
@@ -53,8 +57,18 @@ data class RepData(
         }
     }
 
+    fun getOverlayLineAdherenceGrade(): String {
+        return when {
+            overlayLineAdherence >= 90 -> "Excellent"
+            overlayLineAdherence >= 80 -> "Good"
+            overlayLineAdherence >= 70 -> "Fair"
+            overlayLineAdherence >= 60 -> "Poor"
+            else -> "Very Poor"
+        }
+    }
+
     /**
-     * Convert to CSV row format
+     * Convert to CSV row format with overlay line adherence
      */
     fun toCsvRow(): String {
         return listOf(
@@ -72,14 +86,86 @@ data class RepData(
             String.format("%.1f", pauseDuration),
             String.format("%.1f", concentricDuration),
             String.format("%.0f", qualityScore),
-            getQualityGrade()
+            getQualityGrade(),
+            String.format("%.1f", overlayLineAdherence)
         ).joinToString(",")
     }
 
+    /**
+     * Get detailed rep analysis summary
+     */
+    fun getDetailedSummary(): String {
+        return """
+            Rep #$repNumber Analysis:
+            - Exercise: $exercise ($tempo tempo)
+            - Duration: ${getFormattedDuration()}s
+            - Path Deviation: ${String.format("%.2f", pathDeviation)}cm from overlay line
+            - Quality Score: ${String.format("%.0f", qualityScore)}/100 (${getQualityGrade()})
+            - Overlay Line Adherence: ${String.format("%.1f", overlayLineAdherence)}% (${getOverlayLineAdherenceGrade()})
+            - Phase Breakdown: ${String.format("%.1f", eccentricDuration)}s down, ${String.format("%.1f", pauseDuration)}s pause, ${String.format("%.1f", concentricDuration)}s up
+        """.trimIndent()
+    }
+
+    /**
+     * Get performance insights based on overlay line data
+     */
+    fun getPerformanceInsights(): List<String> {
+        val insights = mutableListOf<String>()
+
+        // Quality insights
+        when {
+            qualityScore >= 90 -> insights.add("✅ Excellent form - maintain this consistency")
+            qualityScore >= 80 -> insights.add("✅ Good form - minor improvements possible")
+            qualityScore >= 70 -> insights.add("⚠️ Acceptable form - focus on consistency")
+            qualityScore >= 60 -> insights.add("⚠️ Form needs work - consider reducing weight")
+            else -> insights.add("❌ Poor form - focus on technique over weight")
+        }
+
+        // Path deviation insights
+        when {
+            pathDeviation < 1.0f -> insights.add("✅ Excellent bar path - stayed close to overlay line")
+            pathDeviation < 2.0f -> insights.add("✅ Good bar path - minor deviations from overlay line")
+            pathDeviation < 3.0f -> insights.add("⚠️ Moderate deviation - focus on following overlay line")
+            else -> insights.add("❌ High deviation - work on bar path consistency")
+        }
+
+        // Tempo insights
+        when {
+            duration < 1.5f -> insights.add("⚠️ Rep too fast - slow down for better control")
+            duration > 8.0f -> insights.add("⚠️ Rep too slow - work on smooth movement")
+            else -> insights.add("✅ Good tempo - maintain this pace")
+        }
+
+        // Phase balance insights
+        val totalPhaseTime = eccentricDuration + pauseDuration + concentricDuration
+        if (totalPhaseTime > 0) {
+            val eccentricPercent = (eccentricDuration / totalPhaseTime) * 100
+            val concentricPercent = (concentricDuration / totalPhaseTime) * 100
+
+            if (eccentricPercent < 30) {
+                insights.add("⚠️ Eccentric phase too fast - slow down the negative")
+            }
+            if (concentricPercent > 60) {
+                insights.add("⚠️ Concentric phase too slow - work on explosive power")
+            }
+        }
+
+        return insights
+    }
+
+    /**
+     * CSV header row with overlay line metrics
+     */
     companion object {
         /**
-         * CSV header row
+         * Calculate overlay line adherence percentage
          */
+        private fun calculateOverlayLineAdherence(pathDeviation: Float, qualityScore: Float): Float {
+            // Higher quality score and lower deviation = better adherence
+            val deviationFactor = kotlin.math.max(0f, 100f - (pathDeviation * 50f))
+            return ((qualityScore * 0.7f) + (deviationFactor * 0.3f)).coerceIn(0f, 100f)
+        }
+
         fun getCsvHeader(): String {
             return listOf(
                 "Rep_Number",
@@ -96,7 +182,8 @@ data class RepData(
                 "Pause_Duration_sec",
                 "Concentric_Duration_sec",
                 "Quality_Score",
-                "Grade"
+                "Grade",
+                "Overlay_Line_Adherence"
             ).joinToString(",")
         }
     }
